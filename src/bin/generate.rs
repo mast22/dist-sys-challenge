@@ -33,7 +33,9 @@ impl Node<(), Payload> for UniqueNode {
         let mut reply = input.into_reply(Some(&mut self.id));
         match reply.body.payload {
             Payload::Generate { .. } => {
-                reply.body.payload = Payload::GenerateOk { guid: format!("{}-{}", self.node, self.id) };
+                reply.body.payload = Payload::GenerateOk {
+                    guid: format!("{}-{}", self.node, self.id),
+                };
 
                 serde_json::to_writer(&mut *output, &reply)
                     .context("serialize response to init")?;

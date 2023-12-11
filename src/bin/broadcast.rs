@@ -1,7 +1,11 @@
 use maelstrom_challenge::*;
-use std::{io::{StdoutLock, Write}, collections::HashMap};
+use std::{
+    char::ToLowercase,
+    collections::{HashMap, HashSet},
+    io::{StdoutLock, Write},
+};
 
-use anyhow::{bail, Context};
+use anyhow::Context;
 use maelstrom_challenge::{Message, Node};
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +18,9 @@ enum Payload {
     },
     BroadcastOk,
     Read,
-    ReadOk { messages: Vec<usize> },
+    ReadOk {
+        messages: HashSet<usize>,
+    },
     Topology {
         topology: HashMap<String, Vec<String>>,
     },
@@ -27,7 +33,10 @@ struct BroadcastNode {
     // The id of the message
     id: usize,
     // State
-    messages: Vec<usize>
+    messages: HashSet<usize>,
+    known: HashMap<String, HashSet<usize>>,
+    neighborhood: Vec<String>,
+    msg_communicated: HashMap<usize, HashSet<usize>>,
 }
 
 impl Node<(), Payload> for BroadcastNode {
@@ -35,7 +44,14 @@ impl Node<(), Payload> for BroadcastNode {
         Ok(Self {
             node: init.node_id,
             id: 1,
-            messages: Vec::new()
+            messages: HashSet::new(),
+            known: init
+                .node_ids
+                .into_iter()
+                .map(|nid| (nid, HashSet::new()))
+                .collect(),
+            neighborhood: Vec::new(),
+            msg_communicated: HashMap::new(),
         })
     }
 
@@ -44,7 +60,7 @@ impl Node<(), Payload> for BroadcastNode {
 
         match reply.body.payload {
             Payload::Broadcast { message } => {
-                self.messages.push(message);
+                self.messages.insert(message);
                 reply.body.payload = Payload::BroadcastOk;
 
                 serde_json::to_writer(&mut *output, &reply)
@@ -53,21 +69,24 @@ impl Node<(), Payload> for BroadcastNode {
             }
             Payload::Read => {
                 reply.body.payload = Payload::ReadOk {
-                    messages: self.messages.clone()
+                    messages: self.messages.clone(),
                 };
 
                 serde_json::to_writer(&mut *output, &reply)
                     .context("serialize response to init")?;
                 output.write_all(b"\n").context("write trailing newline")?;
             }
-            Payload::Topology { .. } => {
+            Payload::Topology { mut topology } => {
+                self.neighborhood = topology
+                    .remove(&self.node)
+                    .unwrap_or_else(|| panic!("no topology given for node {}", self.node));
                 reply.body.payload = Payload::TopologyOk;
 
                 serde_json::to_writer(&mut *output, &reply)
                     .context("serialize response to init")?;
                 output.write_all(b"\n").context("write trailing newline")?;
             }
-            Payload::BroadcastOk | Payload::ReadOk { .. } | Payload::TopologyOk => {},
+            Payload::BroadcastOk | Payload::ReadOk { .. } | Payload::TopologyOk => {}
         }
         Ok(())
     }
