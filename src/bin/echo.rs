@@ -3,7 +3,7 @@ use maelstrom_challenge::*;
 use std::io::{StdoutLock, Write};
 
 use anyhow::Context;
-use maelstrom_challenge::{Body, Message, Node};
+use maelstrom_challenge::{Message, Node};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,25 +20,18 @@ struct EchoNode {
 
 impl Node<(), Payload> for EchoNode {
     fn from_init(_state: (), _init: Init) -> anyhow::Result<Self> {
-        Ok(EchoNode { id: 1 })
+        Ok(Self { id: 1 })
     }
 
     fn step(&mut self, input: Message<Payload>, output: &mut StdoutLock) -> anyhow::Result<()> {
-        match input.body.payload {
-            Payload::Echo { echo } => {
-                let reply = Message {
-                    src: input.dst,
-                    dst: input.src,
-                    body: Body {
-                        id: Some(self.id),
-                        in_reply_to: input.body.id,
-                        payload: Payload::EchoOk { echo },
-                    },
-                };
+        let mut reply = input.into_reply(Some(&mut self.id));
+        match reply.body.payload {
+            Payload::Echo { ref echo } => {
+                reply.body.payload = Payload::EchoOk { echo: echo.clone() };
+
                 serde_json::to_writer(&mut *output, &reply)
                     .context("serialize response to init")?;
                 output.write_all(b"\n").context("write trailing newline")?;
-                self.id += 1;
             }
             Payload::EchoOk { .. } => {}
         }
